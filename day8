@@ -1,0 +1,69 @@
+# 介绍
+这篇笔记完全存放训练每一个新的内容的改动变化 以及训练流程等内容
+
+
+# 训练
+## 训练流程
+1. 首先阅读主目录下的readme文件
+要在开始新的一批实验时，复制之前的代码并提交，例如现在最新实验为1100，要进行实验1200，则运行：
+cp 1100 1200 -r && rm 1200/runs
+git add . && git commit -m '1200 init'
+
+2. 阅读子目录下的readme文件
+先安装好pixtorch
+
+3. 运行训练文件
+按照readme文件下，python train.py -p /media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1123_csp-
+即可运行训练文件，缺什么下什么即可
+
+4. 新建自己的修改了模型文件的project_dir，含 train_cfg.py / test_cfg.py / net.yaml，运行看3
+
+
+
+## 损失函数
+损失函数分三个，分别是bbox_loss, cls_loss, 和dfl_loss
+bbox_loss：边界框回归损失
+cls_loss:分类损失
+dfl_loss:Distribution Focal Loss,校正模型在预测物体边界框时的误差，优化后的效果可以在一定程度上针对有些模糊或者焦点不集中的图片提升对象检测的精度。
+
+## 评估
+
+---
+
+ neg   |   pos   |   fpr/tpr@0.20   |   fpr/tpr@0.50   |   fpr/tpr@0.80
+ 
+---
+
+Neg: 数据集中实际为负类的样本数量（即真实情况为“非目标”的实例）
+
+Pos: 数据集中实际为正类的样本数量（即真实情况为“目标”的实例）
+
+fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线。
+	fpr：假阳性率，即负类样本中被错误预测为正类的比例。公式：FPR = FP / (FP + TN)，越低越好，表示模型误报少。
+	tpr: 真阳性率（召回率），即正类样本中被正确预测的比例。公式：TPR = TP / (TP + FN)，越高越好，表示模型漏报少。
+
+@0.20, 0.50, 0.80：代表不同的分类阈值​（概率阈值），eg：模型预测概率≥0.20时判定为正类
+
+
+# 不同版本优化
+1. 1201 
+	修改变动：简单优化测试 只修改了损失函数的权重，[7.5,0.5,1.5]->[7,1,2] 
+	效果：相同训练batch下，与baseline相比，内存下降了0.07左右，box_loss 有所下降,大概下降了7，cls_loss大幅上升60左右，dfl_loss有所下降2左右
+	
+2. 1202 
+	修改变动：引入了RepConv，修改了pixtorch里面的pop/common.py和pop/__init__.py,train函数加入了推理时模型融合的代码 
+	效果：训练内存增加了0.02，三种损失相似或小幅度下降，但是在验证集上的效果很不理想，可能是推理时，repconv进行了融合，前期效果不好
+	问题：
+	
+3. 1203
+	修改变动：将C3改成了c2f，
+	效果：
+4. 1204
+	修改变动：将Conv换成SCDown，
+	效果：
+5. 1205
+	修改变动：REFCONV,重新聚焦卷积（re-parameterized refocusing convolution）
+	
+
+
+

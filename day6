@@ -3,6 +3,9 @@
 
 数据云盘：http://nextcloud.pixtalks.com
 
+https://cvteam.xyz/diffusion/236/
+人脸检测/全局活体的训练代码
+
 
 
 
@@ -31,13 +34,16 @@ git remote add pixtalks 远程仓库URL
 6. 上传
 git push -u pixtalks master
 
+7. 删除git
+rm -rf .git
+
 
 
 # 远程训练
 大体框架：先利用SSH远程连接 再在远程服务器使用Tmux窗口进行训练（Tmux相当于在远程的机子开通了一个窗口，即便连接中断，也可以继续训练
 
 
-# Yolo
+
 
 
 

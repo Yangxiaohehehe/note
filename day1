@@ -16,12 +16,16 @@
  	
 
 ## tmux
+	Tmux是一个终端复用软件，通过一个终端登录远程主机并运行tmux后，在其中可以开启多个控制台而无需再“浪费”多余的终端来连接这台远程主机；
 	tmux new -s <session-name>
 	tmux detach
 	tmux ls
 	tmux attach -t 0
 	tmux kill-session -t 0
 	tmux rename-session -t 0 <new-name>
+	exit（退出窗口，并不会保留后台）
+	
+	
 	
 
 ## vim

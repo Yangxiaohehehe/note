@@ -38,15 +38,26 @@ Model
 	INT8 存储 + ​INT32 计算
 	
 # Yolo 11
-
+	改进的骨干和颈部架构，增强了特征提取能力，提高了物体检测的精确度和复杂任务的表现
+	https://blog.csdn.net/qq_64693987/article/details/142668985
 ## 技术改进
+compared to Yolov8
+	将CF2模块改成C3K2
+	在SPPF模块后面添加了一个C2PSA模块
+	将YOLOv10的head思想引入到YOLO11的head中
 
-### 架构创新
+### C3k2网络结构
+	C2F模块转变过来，当c3k这个参数为FALSE的时候，C3K2模块就是C2F模块
+	
+###  C2PSA的网络结构
+	对 C2f 模块的扩展，它结合了PSA(Pointwise Spatial Attention)块，用于增强特征提取和注意力机制
+	实现了一个带有注意力机制的卷积块
 
-
-### 性能优化
-
-
+### 损失函数
+	2 个分支： 分类和回归分支，没有了之前的 objectness 分支。
+	分类分支依然采用 BCE Loss。回归分支使用了 Distribution Focal Loss（DFL Reg_max默认为16）+ CIoU Loss。3 个 Loss 采用一定权重比例加权即可
+	
+	
 
 # 训练
 
