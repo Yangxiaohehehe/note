@@ -13,10 +13,31 @@ git add . && git commit -m '1200 init'
 先安装好pixtorch
 
 3. 运行训练文件
-按照readme文件下，python train.py -p /media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1123_csp-
+按照readme文件下，python train.py -p /media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1123_csp
 即可运行训练文件，缺什么下什么即可
 
 4. 新建自己的修改了模型文件的project_dir，含 train_cfg.py / test_cfg.py / net.yaml，运行看3
+
+## 测试
+1. python test.py -p $project_dir  # 跑与训练时一致的验证集测试结果，会有少量数值计算导致的偏差
+2. python test.py -p runs/1123_csp-net-l_nfl_a4_h256_w192 -tt runs/test_vis_cfg.py:vis_256x192 -nt vis  # 可视化测试，需修改 runs/test_vis_cfg.py 中的目录路径，可参考此处参数写自己的配置
+
+## export
+1. python export.py -p $project_dir --input 1 1 $height $width  # height / width 填写输入的高和宽，执行完此命令会在 project_dir/save/train/weights 下生成 last.onnx / last_batch.onnx
+示例：python export.py -p $project_dir --input 1 1 192 144
+2. python test.py -p runs/1123_csp-net-l_nfl_a4_h256_w192 -nt val_onnx  # 测试查看精度是否与torch模型对上
+3. 参考 runs/1123_csp-net-l_nfl_a4_h256_w192/gfas_v2_3 打包模型（split_cat模型是第5步导出的），更新于 https://cvteam.xyz/T401
+4. 将发版模型的 .pt 权重路径加到 runs/.gitignore 里
+5. 用于君正平台的模型不支持超过2输入的concat，转onnx时需把SPPF的中间特征导出，参考 runs/1123_csp-net-l_nfl_a4_h256_w192:export_sc 的写法，调用 export.py 时加"-nt export_sc"，此步骤未写测试代码，可根据 demo/test_onnx.py 查看单张图像的结果是否与第一步模型吻合
+
+## 参数量
+1. scripts/count_net.py 可计算网络的权重数量及计算量
+
+---
+
+python scripts/count_net.py --net /home/yang/Project3/face_detect_pixtorch/1200/runs/1208/net.yaml -iw 144 -ih 192
+
+---
 
 
 
@@ -46,24 +67,71 @@ fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线
 
 
 # 不同版本优化
-1. 1201 
+0. 1200 baseline
+	参数量：flops: 95.704M          params: 148.226K
+
+1. ~~1201 ~~
 	修改变动：简单优化测试 只修改了损失函数的权重，[7.5,0.5,1.5]->[7,1,2] 
 	效果：相同训练batch下，与baseline相比，内存下降了0.07左右，box_loss 有所下降,大概下降了7，cls_loss大幅上升60左右，dfl_loss有所下降2左右
 	
-2. 1202 
+	
+2. ~~1202 ~~
 	修改变动：引入了RepConv，修改了pixtorch里面的pop/common.py和pop/__init__.py,train函数加入了推理时模型融合的代码 
 	效果：训练内存增加了0.02，三种损失相似或小幅度下降，但是在验证集上的效果很不理想，可能是推理时，repconv进行了融合，前期效果不好
-	问题：
 	
-3. 1203
+	
+3. ~~1203~~
 	修改变动：将C3改成了c2f，
-	效果：
-4. 1204
-	修改变动：将Conv换成SCDown，
-	效果：
-5. 1205
-	修改变动：REFCONV,重新聚焦卷积（re-parameterized refocusing convolution）
+	效果：dfl_loss大幅下降，相比baseline能下降80多，bbox_loss高2,cls_loss高很多，大概能有110,验证集的精度上来讲，各有千秋，但是训练了五次以后就开始下降了
 	
+4. ~~1204~~
+	修改变动：将Conv换成SCDown，
+	效果：效果不理想，均不如baseline
+	参数大小：flops: 93.008M		params: 136.690K
+	
+5. ~~1205~~
+	修改变动：Conv替换成REFCONV,重新聚焦卷积（re-parameterized refocusing convolution）
+	效果：效果不理想，精度输出甚至为0,应该是REF定义有问题，
+	
+6. **1206**
+	修改变动： 在1203的基础上，降低了学习率，降低至0.01->0.005，训练配置采用1122
+	效果：精度均优化的同时内存减小
+	flops: 128.328M		params: 189.186K  （1123：flops: 225.939M         params: 365.738K
 
 
+7. **1207** 
+	修改变动： 在1206的基础上，使用了1123的cfg文件，依旧使用1206的net.yaml
+	效果：效果同P6，结果还行，小有优化
+	参数量：125.633M         params: 177.650K
+	
+8. ~~1208~~ 
+	修改变动：结合1206和1204,学习率0.005->0.001
+	效果：同1209 
+	
+9. ~~1209~~
+	修改变动：结合1204和1206,学习率0.001
+	效果：效果几乎全面下降
+
+10. 1210
+	修改变动：结合1122的网络配置+1123的训练测试配置，其他内容不变，主要之修改了训练配置的尺寸从256 192-> 192 144
+	效果:
+
+11. 1211 
+	修改变动： 在1210 的基础上加入了K3模组的新数据
+
+	
+	
+## 参数量对比：
+尺寸 256 192对比 HW
+1122：flops: 170.140M         params: 148.226K
+1123：flops: 401.670M         params: 365.738K
+1208：flops: 228.139M         params: 189.186K
+
+尺寸 192 144对比：
+1122：flops: 95.704M          params: 148.226K
+1123：flops: 225.939M         params: 365.738K
+1208：flops: 128.328M         params: 189.186K
+
+
+## 测试1208在192 144的效果
 

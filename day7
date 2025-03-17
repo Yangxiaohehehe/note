@@ -24,6 +24,8 @@ scp -P 2290 ~/report.txt yangchenhe@s2.pixtalks.com:~/documents/
 
 # 从远程服务器下载 `data.zip` 到本地的 `~/downloads/` 目录
 scp -P 2290 yangchenhe@s2.pixtalks.com:~/data.zip ~/downloads/
+scp -P 2290 yangchenhe@s2.pixtalks.com:/media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1208/save/train/weights/last.onnx   /home/yang/Project3/face_detect_pixtorch/1200/runs/1210/save/train/weights
+
 
 ---
 
