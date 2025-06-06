@@ -1,0 +1,39 @@
+# 卷积
+
+## 卷积函数
+卷积的参数一般包含了
+
+	输出输出通道数：c1和c2
+	卷积核大小：k
+	步长：S
+	填充：P
+	
+输出尺寸和输入尺寸的关系是：
+	
+	Hout=|_Hin+2p-k/s_| +1
+	
+	
+	
+	
+	
+
+## RepConv
+重参数卷积
+
+
+https://github.com/WongKinYiu/yolov7/blob/main/models/common.py
+
+https://github.com/ultralytics/yolov5/blob/master/models/common.py#L210
+
+https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/modules/conv.py
+
+# 下采样
+下采样（Downsampling）是指通过减少数据量或分辨率来简化信息的处理技术，其具体定义和应用场景因领域而异
+
+1. 解决模型拆分重组问题
+
+2. 二合一模型发版
+
+3. 全局活体发版2.5，尝试GhostConv
+
+4. 找到了一个神经网络+数学方法的项目，跑通测试

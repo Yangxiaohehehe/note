@@ -1,0 +1,152 @@
+1. onnx tflite infer
+
+2. tmux vim
+
+3 onnx tflite 推理 出结果 去C 跑出框 再回到python进行数据分析
+
+
+
+# 命令
+## linux command
+	ctrl alt T -> create a new terminal
+	mkdir <目录名> 创建目录	
+	rm -f file1 -> 删除’file1’⽂件
+	rmdir dir1 删除’dir1’⽬录
+ 	rm -rf dir1 删除’dir1’⽬录和其内容
+ 	df -h 查看磁盘
+	du miniconda3 -sh
+ 	
+
+## tmux
+	Tmux是一个终端复用软件，通过一个终端登录远程主机并运行tmux后，在其中可以开启多个控制台而无需再“浪费”多余的终端来连接这台远程主机；
+	tmux new -s <session-name>
+	tmux detach
+	tmux ls
+	tmux attach -t 0
+	tmux kill-session -t 0
+	tmux rename-session -t 0 <new-name>
+	exit（退出窗口，并不会保留后台）
+	
+	
+	
+
+## vim
+### Introduction
+	高效的文本编辑器,常用模式有四种
+### 正常模式
+	浏览和修改文本内容
+### 插入模式
+	i -> 光标前输入文字并进入插入模式
+	a -> 光标后输入文字并进入插入模式
+	o -> 光标下面开一新行来输入文字并进入插入模式
+	s -> 删除光标所在的字符并进入插入模式	
+	I -> 在行首输入文字并进入插入模式
+	A -> 在行尾输入文字并进入插入模式
+	O -> 在光标上面开一新行来输入文字并进入插入模式
+	S -> 删除光标所在行并进入插入模式
+
+
+# 远程连接步骤
+1. 利用ssh远程连接
+ssh -p 2290 yangchenhe@s2.pixtalks.com
+ 
+2. 添加公钥到代码网站
+添加的是公钥而不是密钥
+cat ~/.ssh/id_rsa.pub
+
+3. git clone目标文件
+
+4. 如何传输文件
+
+---
+
+## 将本地的 `report.txt` 上传到远程服务器的 `~/documents/` 目录
+scp -P 2290 ~/report.txt yangchenhe@s2.pixtalks.com:~/documents/
+scp -P 2290 /home/yang/Project3/face_detect_pixtorch/1200/runs/1212/net.yaml yangchenhe@s2.pixtalks.com:/media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1212
+
+## 从远程服务器下载 `data.zip` 到本地的 `~/downloads/` 目录
+scp -P 2290 yangchenhe@s2.pixtalks.com:~/data.zip ~/downloads/
+
+
+解除掛載：umount remote_media
+
+---
+
+scp可以传输文件夹
+ssh -p 35394 root@region-1.autodl.com
+
+scp -rP 35394 root@region-1.autodl.com:<实例中的文件/文件夹> <本地文件/文件夹>
+
+
+# 完整的NVIDIA流程
+
+1. 下载NVIDIA驱动
+sudo apt install nvidia-driver-550
+检测：nvidia-smi
+
+2. 安装 CUDA Toolkit
+wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run
+sudo sh cuda_12.1.1_530.30.02_linux.run
+
+配置环境变量
+echo 'export PATH=/usr/local/cuda-12.1/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+验证：nvcc --version
+
+3. 下载anaconda或者miniconda
+
+
+
+
+# git流程
+1. 配置用户名
+
+---
+
+git config --global user.name "你的用户名"
+git config --global user.email "你的邮箱"
+
+---
+ 
+2. 初始化本地仓库
+git init 
+
+3. 把文件加入到暂缓区
+git add .  
+
+4. 提交到本地仓库
+git commit -m "首次提交：初始化项目"
+
+5. 关联远程仓库
+git remote add pixtalks 远程仓库URL
+
+6. 上传
+git push -u pixtalks master
+
+7. 删除git
+rm -rf .git
+
+
+# 软链接和硬链接
+
+## 软链接
+    软连接是一种特殊类型的文件，它包含了另一个文件或目录的路径名。当访问软连接时，系统会通过该路径名找到并访问目标文件或目录。
+    软链接类似于Windows系统中的快捷方式，它存储的是目标文件的路径，而不是文件本身的数据。这意味着如果目标文件被移动、重命名或删除，软链接将会失效。
+
+## 硬链接
+  硬链接直接指向文件的数据所在的位置，而不是文件名。多个硬链接实际上是共享同一存储空间的文件名，它们具有相同的inode号。
+
+# 远程文件挂载
+sshfs -o ssh_command="ssh -p 2290"  yangchenhe@s2.pixtalks.com:/media/remote_media
+在s2上运行ssh -p 2290 yangchenhe@s4.pixtalks.com可跳到s4
+sshfs -o ssh_command="ssh -p 2290"  yangchenhe@s4.pixtalks.com:/media/ remote_media
+scp -P 2290 yangchenhe@s2.pixtalks.com:~/data.zip ~/downloads/
+
+# Sleep操作
+sleep 2 && python train.py
+可以按顺序执行操作
+
+
+

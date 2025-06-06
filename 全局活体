@@ -1,5 +1,6 @@
-# 介绍
-这篇笔记完全存放训练每一个新的内容的改动变化 以及训练流程等内容
+# 任务
+1. 全局活体任务的长时间优化，提升精度，优化模型参数量，Flops以及其他内容。
+2. 有时新增加数据后，需要对数据进行可视化测试并分析问题
 
 
 # 训练
@@ -20,7 +21,24 @@ git add . && git commit -m '1200 init'
 
 ## 测试
 1. python test.py -p $project_dir  # 跑与训练时一致的验证集测试结果，会有少量数值计算导致的偏差
-2. python test.py -p runs/1123_csp-net-l_nfl_a4_h256_w192 -tt runs/test_vis_cfg.py:vis_256x192 -nt vis  # 可视化测试，需修改 runs/test_vis_cfg.py 中的目录路径，可参考此处参数写自己的配置
+2. python test.py -p runs/1123_csp-net-l_nfl_a4_h256_w192 -tt runs/test_
+
+
+_cfg.py:vis_256x192 -nt vis  # 可视化测试，需修改 runs/test_vis_cfg.py 中的目录路径，可参考此处参数写自己的配置
+
+
+直接调用net里面的->vis
+
+vis输入->data cls bbox
+
+数据预处理
+
+
+---
+
+python test.py -p /media/data1/yangchenhe/snap/snapd-desktop-integration/face_detect_pixtorch/1200/runs/1200_base
+
+---
 
 ## export
 1. python export.py -p $project_dir --input 1 1 $height $width  # height / width 填写输入的高和宽，执行完此命令会在 project_dir/save/train/weights 下生成 last.onnx / last_batch.onnx
@@ -40,6 +58,15 @@ python scripts/count_net.py --net /home/yang/Project3/face_detect_pixtorch/1200/
 ---
 
 
+## vis可视化
+直接调用net里面的->vis（可视化前需挂载文件以及修改配置等操作）
+
+vis输入->data cls bbox
+命令：
+python test.py -p runs/1200_base -tt runs/1200_base/train_cfg.py:vis -nt vis
+
+改进：将vis改到testcfg中。以及配置。
+
 
 ## 损失函数
 损失函数分三个，分别是bbox_loss, cls_loss, 和dfl_loss
@@ -48,6 +75,8 @@ cls_loss:分类损失
 dfl_loss:Distribution Focal Loss,校正模型在预测物体边界框时的误差，优化后的效果可以在一定程度上针对有些模糊或者焦点不集中的图片提升对象检测的精度。
 
 ## 评估
+
+请注意，评估过程中使用的不是具体的类别cls，是类别1与2转换后的结果。具体请看源代码。
 
 ---
 
@@ -67,6 +96,8 @@ fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线
 
 
 # 不同版本优化
+
+## 不同版本内容
 0. 1200 baseline
 	参数量：flops: 95.704M          params: 148.226K
 
@@ -76,8 +107,9 @@ fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线
 	
 	
 2. ~~1202 ~~
-	修改变动：引入了RepConv，修改了pixtorch里面的pop/common.py和pop/__init__.py,train函数加入了推理时模型融合的代码 
-	效果：训练内存增加了0.02，三种损失相似或小幅度下降，但是在验证集上的效果很不理想，可能是推理时，repconv进行了融合，前期效果不好
+	修改变动：引入了RepConv，修改了pixtorch里面的pop/common.py和pop/__init__.py,train函数加入了推理时模型融合的代码，修改的RepConv取自ultralytics
+	效果：效果会比baseline好，全部会好一点的样子
+	参数量：flops: 97.860M		params: 149.938K
 	
 	
 3. ~~1203~~
@@ -109,7 +141,7 @@ fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线
 	效果：效果同1207
 	
 9. ~~1209~~
-	修改变动：结合1204和1206,学习率0.001
+	修改变动：结合1204和1206,学习率0.001,SCDown和C2f共同使用
 	效果：效果几乎全面下降
 
 10. 1210
@@ -117,24 +149,137 @@ fpr/tpr ：在不同分类阈值下的性能指标，通常用于绘制ROC曲线
 	效果:
 
 11. 1211**
-	修改变动： 在1210 的基础上加入了K3模组的新数据
+	修改变动： 在1210 的基础上加入了K3模组的新数据，epoch65
+	效果：
 	
 12. 1212
-	修改变动：
+	修改变动：通道压缩30% 减小了输入通道数
+	效果:效果略有不好
+	
+13. 1213
+	修改变动：采用了1212和1202的结合，相比与baseline，卷积-> RepConv. c3->c2f,通道压缩百分之30,采用了1123的训练配置
+	效果：
+	1213:flops: 81.454M		params: 123.654K	
+	
+14. 1214
+	修改变动：1213的网络配置，采用了1211的配置 加入了k3
+	效果：
+	1213：
+15. 1215 
+	修改变动：23配置 22模型  epoch50 k3数据
+	效果：
 
+16. 1216
+	修改变动：在1213的基础上，c2f变成了c3k2
+	效果：不是很好
+	
+17. 1217
+	修改变动：c2f+DWConv的结构
 	
 	
+
 ## 参数量对比：
 尺寸 256 192对比 HW
 1122：flops: 170.140M         params: 148.226K
 1123：flops: 401.670M         params: 365.738K
 1208：flops: 228.139M         params: 189.186K
 
+1220 :flops: 401.670M         params: 365.738K
+1226:	flops: 383.533M         params: 342.410K
+1227:	flops: 437.846M         params: 371.682K
+
 尺寸 192 144对比：
 1122：flops: 95.704M          params: 148.226K
 1123：flops: 225.939M         params: 365.738K
 1208：flops: 128.328M         params: 189.186K
+1212: flops: 80.085M          params: 122.658K
+1202：flops: 273.881M         params: 149.378K
+1213:flops: 81.454M		params: 123.654K
+1219:flops: 162.371M		params: 161.762K
+1221:flops: 91.480M          params: 142.242K
+
+1225:分支：flops: 284.056M         params: 262.564K  效果很差
+	修正：flops: 347.646M         params: 321.444K
+1228: head 去除了池化层：flops: 284.056M		params: 262.564K
+1229:flops: 93.091M          params: 142.322K
 
 
-## 测试1208在192 144的效果
+1230:flops: 261.412M		params: 231.220K
+1233: flops: 261.412M		params: 231.220K
+
+1234：多分支v2版本：flops: 135.600M		params: 239.620K
+
+1235：多分支v3版本 flops: 253.961M		params: 238.852K
+
+1236：多分支v7版本 flops: 253.961M		params: 238.852K
+
+
+1237: 多分v4版本：flops: 223.838M         params: 206.228K
+
+1238:flops: 223.838M         params: 206.228K
+
+
+1241:  多分支测试版本flops: 208.411M		params: 188.660K
+1242 : flops: 221.267M         params: 200.372K
+
+1122：flops: 95.704M          params: 148.226K
+
+
+
+
+
+
+
+
+
+
+# 测试
+## 任务介绍
+1. 有时任务会有数据到，需要进行相关测试。
+~~2. 数据格式大多是raw或者yuv，需要对图片先->jpg->检测~~
+2. 更新了方法2,现在raw和yuv都是读取文件的前多少位，然后reshape后，换成的png（jpg是有损压缩，png是无损也所）
+3. 检测方法，同一采用test，修改网络结构后，统一命令为,同时还需要修改测试文件中的路径和batch
+
+----
+
+python test.py -p runs/1124 -tt runs/test_vis_cfg_o.py:vis_256x192 -nt test_onnx --device "cpu"
+python test.py -p runs/1124 -tt runs/test_vis_cfg_o.py:vis_256x192 -nt test_tflite --device "cpu"
+ 
+---
+
+方法：
+1. 只用vis进行可视化然后检查
+2. 手写了对文件夹下图片的转换以及测试
+
+针对模型进行图片转换然后检测，并整理成相关文档
+
+使用实例：
+
+---
+
+python jpgtest.py --data result/rec --onnx runs/1123_csp-net-l_nfl_a4_h256_w192/gfas_v2_3/gfas_v2_3.onnx --so runs/1122_csp-net_nfl_a4_h192_w144/gfas_v2_2/demo/libyolov5_inout_lib.so --output rec
+
+python yuv2jpg.py --data_dir result/rec --onnx runs/1123_csp-net-l_nfl_a4_h256_w192/gfas_v2_3/gfas_v2_3.onnx --so runs/1122_csp-net_nfl_a4_h192_w144/gfas_v2_2/demo/libyolov5_inout_lib.so --output_dir rec
+
+---
+
+要跑：
+背景涂黑小模型
+优化版本
+
+
+
+
+1. 小目标：
+问题
+1. 包含的判别性特征特征过少
+2. anchor难匹配问题。这主要针对anchor-based方法，由于小目标的gt box和anchor都很小，anchor和gt box稍微产生偏移，IoU就变得很低，导致很容易被网络判断为negative sample。
+3. 
+预处理解决问题方式
+    我们通过对包含小目标的图像进行过采样来解决第一个问题。
+    第二个问题是通过在每个包含小目标的图像中多次复制粘贴小目标来解决的。
+
+相关知识见知乎
+https://zhuanlan.zhihu.com/p/426047353
+
 

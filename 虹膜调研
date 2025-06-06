@@ -20,6 +20,21 @@
 | UBIRIS.v2                   | 11,102张图像（261名受试者）                                          | 无约束条件（远距离、移动、可见波长）拍摄，含真实噪声因素                                            | 原网址无法访问                                                                                        | 已失效                                                                   |
 
 
+
+
+
+## 下载数据集
+数据：
+1. 中国科学院虹膜图像数据库（CASIA-Iris） ：	已下载					   			非商业				已下载		
+2. UTIRIS数据库：				rgb和bmp都有							开放				已下载
+3. GI4E数据库：					人脸								非商业				已下载
+4. MMU数据库：					只有bmp								开放				已下载
+5. 华沙数据集：Records of the Dataset are made available to researchers only after the receipt of a completed release agreement signed by the researcher’s institution on behalf of the individual researcher or research unit. 需要机构发邮件申请 									非商业				未下载
+
+## 数据集处理
+虹膜数据集的标签通常分为两类：​分割标签​（用于定位虹膜区域）和身份标签​（用于识别个体）
+
+
 ## 方法
 
 ### Iris_Osiris_v4.1（基于Daugman 的经典方法）

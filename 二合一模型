@@ -1,0 +1,306 @@
+# 任务
+## 内容
+
+	全局活体+掌检测模型二合一
+	将掌并入全局活体
+	精度测试
+
+任务介绍
+
+	1.手掌的类别：（分别为：真脸，假脸，左手，右手，左掌，右掌（并无活体识别）
+	2.修改训练配置+测试配置->并入数据集
+
+数据集总路径：/media/data1/train_palm/detect_data/
+
+
+
+
+# 具体实现
+## 问题介绍
+现在存在的问题是：
+
+1. 掌部分的标注和脸部分的标注不同，脸是imgpath,label的形式，掌是标准的YOLO格式->导致属于处理、后处理都需要改变
+2. 一个模型如何训练两个，网络结构需要改变
+
+解决方案：
+
+1. 针对数据格式问题，yolo是xywhn，脸是xyxy，于是我选择了在yolo获得bbox后，利用函数统一转换为xyxy，像脸兼容。
+2. 模型结构方面的改变，原：backbone+head，现在改变成为了backbone+face_head/palm_head的格式利用了两个头->带来的问题，如何将不同数据分给两个头
+3. 为了解决2带来的问题，数据预处理阶段我加入了tag，针对不同的transform，加入不同的tag，并在中间加入split层区分。
+3. 后处理阶段，face部分采用的是bbox，conf，cls_conf的格式（cls_conf是类别0-类别1的平方根，代表活体分数），我重构了后处理函数，大体方向未变，主要是将模型输出的output，转换成bbox,conf,cls的形式
+4. 在后处理阶段完成后，face输出的是cls和conf就可以进行评估，但掌需要map评估，需要(bi,pred_cls,pred_box,,conf,gt_box,gt_cls)的信息，于是走了不同的流程
+5. 在步骤4后，重写tester类，tester类的流程中采用了，原始yolov5的评估函数，但是数据格式需要变换，需要将真实与预测对应并获得iou矩阵等信息
+6. 注意在步骤五中，需要对真实框去除填充，置信度阈值过滤，计算IoU矩阵，按置信度降序排序预测框，初始化correct矩阵和阈值匹配等步骤再利用函数进行测试
+7. 如要可视化，请注意可视化采用的是xywh的格式，但代码大部分采用的都是xyxy的处理方式。并且可视化是和在一起的，新建了fuze函数concat两部分信息，从而可视化可以同时进行
+8. 整体流程：
+
+---
+    A[f数据集配置] --> B[f预处理]-->C[dataloader] --> D[模型推理] --> E1[后处理/NMS] --> F1[匹配预测与真值] --> G1[指标计算]
+    				   |		     |	
+    A1[p数据集配置]--> B1[p预处理]--|		     |-------------->E2[后处理/NMS] -->F2[ 获得预测数值与真实数值] -- >G2[指标计算]
+
+---
+
+
+## 数据集
+
+### 数据集路径
+数据集路径如下
+train：
+/media/data1/train_palm/detect_data/train_palm_landmarks_v8.3/train_ir_clean_1.txt
+/media/data1/train_palm/detect_data/train_palm_landmarks_v8.3/train_rgb_clean_1.txt
+/media/data1/train_palm/detect_data/HandDetectData_Neg_From_FaceData/val_result/list.txt
+/media/data1/train_palm/detect_data/E1_hand_窗边拍图_20241107/data/train_v3.txt
+
+
+val:
+/media/data1/train_palm/detect_data/train_palm_landmarks_v8.3/val_rgb_clean_1.txt
+/media/data1/train_palm/detect_data/E1_hand_窗边拍图_20241107/data/test_v3.txt
+
+test: 
+/media/data1/train_palm/detect_data/train_palm_landmarks_v8.3/val_ir_clean_1.txt 
+/media/data1/train_palm/detect_data/train_palm_landmarks_v8.3/val_rgb_clean_1.txt 
+/media/data1/train_palm/detect_data/E1_hand_窗边拍图_20241107/data/test_v3.txt
+
+
+### 数据集介绍
+这三类文件夹下的数据：
+
+1. 正常左右掌的训练数据
+2. 全是人脸，将人脸类作为背景，无标签
+3. 有一类背景过曝效果不好，于是单作为两类，所以类别是4+2的形式
+
+### 数据格式处理
+
+#### 原本数据集类型TXTdataset
+原face格式是：一行信息包含了图片路径 和后面的标注
+
+原来的处理流程：
+1. TXTdata内进行处理获得得到了Line和img
+2. Line和img经过transform处理返回信息
+
+---
+line (str): 'name_path num p11 p12 p13 p14 c1 p21 p22 p23 p24 c2 ...'
+
+---
+
+原数据Transform
+
+---
+
+_train_transform = {
+    'input': ['image', 'line'],
+    'layers': [
+        # in,                                      module,                    args,                             out
+        ['line',                                   'Line2DetectLabel',        [],                               ['cls', 'bbox']          ],
+        ['image',                                  'Gray',                    [],                               'image'                  ],
+        [['image', 'bbox', 'cls'],                 'AffineAugment',           [[192, 144], [14, 112], 15, 0.8, 0.5], ['image', 'bbox', 'cls']],
+        [['image', 'bbox'],                        'RandomFlip',              [],                               ['image', 'bbox']        ],
+        ['image',                                  'InputNormalize',          [],                               'image'                  ],
+        [['cls', 'bbox'],                          'LabelPadding',            [8],                              ['cls', 'bbox']          ],
+        [['image', 'cls', 'bbox'],                 'Contiguous',              [],                               ['image', 'cls', 'bbox'] ],
+    ],
+    'output': ['image', 'cls', 'bbox'],
+}
+
+---
+
+
+
+
+#### 新数据集类型YOLOdataset
+新的数据集，是YOLO格式数据集：即指向图片路径，图片路径可以替换成label获取标签
+YOLOdataset格式数据集处理已经实现了相关部分的代码
+
+现在修改后的
+现在YOLO：
+-文本->图片路径
+-图片路径->替换变成了标签路径
+-通过标签路径->cls bbox
+1. Yolodata内得到 cls img bbox
+2. 经过transform处理返回信息
+
+---
+
+_yolo_transform = {
+    'input': ['image', 'cls','bbox'],
+    'layers': [
+        ['image',                                  'Gray',                    [],                               'image'                  ],
+        [['image', 'bbox', 'cls'],                 'AffineAugment',           [[192, 144], [14, 112], 15, 0.8, 0.5], ['image', 'bbox', 'cls']],
+        [['image', 'bbox'],                        'RandomFlip',              [],                               ['image', 'bbox']        ],
+        ['image',                                  'InputNormalize',          [],                               'image'                  ],
+        [['cls', 'bbox'],                          'LabelPadding',            [8],                              ['cls', 'bbox']          ],
+        [['image', 'cls', 'bbox'],                 'Contiguous',              [],                               ['image', 'cls', 'bbox'] ],
+    ],
+    'output': ['image', 'cls', 'bbox'],
+}
+
+---
+
+
+#### 主要解决方式：
+1. 修改配置文件：分别修改train_cfg.py 文件和test_cfg.py，
+	主要修改内容是	
+		更改根目录，加入了掌的四个训练路径，两个测试路径。
+		修改训练配置：添加了Yolo训练配置，针对掌数据集，使用这个配置，修改的地方在于去掉了Line2DetectLabel，因为YOlo可以直接返回bbox，cls，img, 修改了label_processing：定义数据集类型的基础配置模板，不同数据集使用不同的配置模板，并且在数据集权重部分加入参数用于控制掌手比例
+		修改测试配置:利用了两个测试文件
+		
+2. 修改Yolodataset数据：Yolodataset中的会自动padding，与后续实现进行了重复。所以我进行了删除。
+
+3. 预处理中间加入一层函数，用于获得tag
+实例
+
+---
+
+_yolo_transform = {
+    'input': ['image', 'cls','bbox'],
+    'layers': [
+        ['image',                                  'Gray',                    [],                               'image'                  ],
+        [['image', 'bbox', 'cls'],                 'AffineAugment',           [[256, 192], [14, 112], 15, 0.8, 0.5], ['image', 'bbox', 'cls']],
+        [['image', 'bbox'],                        'RandomFlip',              [],                               ['image', 'bbox']        ],
+        ['image',                                  'InputNormalize',          [],                               'image'                  ],
+        [['cls', 'bbox'],                          'LabelPadding',            [8],                              ['cls', 'bbox']          ],
+        [ 'cls', 'Addtag', {'value': 1, 'key': 'tag'},  'tag'],
+        [['image', 'cls', 'bbox',"tag"],                 'Contiguous',              [],                               ['image', 'cls', 'bbox',"tag"] ],
+    ],
+    'output': ['image', 'cls', 'bbox',"tag"],
+}
+
+---
+
+  
+
+### 标签偏移问题
+问题
+
+	原先标签是0 1两类
+	现在加入手掌了增加了0 1 2 3 4 5 ，总共是六类
+	导致了ID重复问题
+	
+解决
+	训练阶段分开训练，只需要可视化阶段，fuze函数中加入标签偏移即可
+
+
+
+### 人脸与手掌互不干扰
+问题介绍：
+ 	
+ 	人脸中可能包含手掌，手掌也可能含有人脸。但是目的要让他们互不干扰
+  
+
+问题解决：
+	
+	采用了两个头的格式，net结构新增split层，对于不同tag分割流向不同的层，并且split层并无权重，只需要再新建层Identity替代这层即可
+
+训练配置如下：
+
+---
+
+train:
+  input: [data, cls, bbox,tag]
+
+  layers:
+    # innode,              module,             args,                                         outnode
+    - [data,               PTNet,              [*backbone],                                  p3       ]
+
+    - [[p3, tag],          Split,              [],                                          [p3_face, p3_palm]]
+    - [[cls, tag],         Split,              [],                                          [cls_face, cls_palm]]
+    - [[bbox, tag],        Split,              [],                                          [bbox_face, bbox_palm]]
+
+    - [p3_face,                 PTNet,              [*face_head],                                      face_out       ]
+    - [p3_palm,                 PTNet,              [*palm_head],                                      palm_out       ]
+    - [face_out, Detect, {"nc": *face_nc, "ch": [48], "stride": *stride}, face_detect]
+    - [palm_out, Detect, {"nc": *palm_nc, "ch": [48], "stride": *stride}, palm_detect]
+
+
+  
+    # --- 人脸损失 ---
+    - 
+      - [face_detect, cls_face, bbox_face]
+      - v8DetectionLoss
+      -
+        stride: *stride
+        nc: *face_nc
+        box: 7.5
+        cls: 0.5
+        dfl: 1.5
+      - [face_bbox_loss, face_cls_loss, face_dfl_loss]
+
+    # --- 手掌损失---
+
+    - 
+      - [palm_detect, cls_palm, bbox_palm]
+      - v8DetectionLoss
+      -
+        stride: *stride
+        nc: *palm_nc
+        box: 7.5
+        cls: 0.5
+        dfl: 1.5
+      - [palm_bbox_loss, palm_cls_loss, palm_dfl_loss]
+
+  output: [face_bbox_loss, face_cls_loss, face_dfl_loss,palm_bbox_loss, palm_cls_loss, palm_dfl_loss]
+  
+ ---
+  
+  
+ 
+
+
+# 结果验证
+1. 搞清原来的精度是多少
+原先yolo的测试命令：
+python val.py --weights pixtalks/tasks/hand_and_face_detect/train_hand_rec/exp37/weights/best.pt --data pixtalks/tasks/hand_and_face_detect/train_hand_rec/data_v8.54.yaml --img 256
+
+
+                 Class     Images  Instances          P          R      mAP50   mAP50-95: 100%|██████████| 54/54 [00:10<00:00,  4.98it/s]
+                   all       1704       3408      0.854      0.612      0.705       0.36
+                    LH       1704        822       0.68      0.588        0.6      0.258
+                    RH       1704        882      0.861      0.556      0.607      0.258
+                    LP       1704        822      0.927      0.664      0.811      0.462
+                    RP       1704        882      0.946      0.638      0.802      0.461
+
+衡量精度：map指标，预测框和真实框在不同iou下的比例，map50-95是十个指标下的平均值，P（精确度）：检测物体的精确度，表示有多少检测是正确的，R（召回率）：模型识别图像中所有物体实例的能力。	
+
+
+2. 在不同数据比例以及尺寸下结果不同
+效果较好的是1：3,尺寸192,144
+
+3. 尺寸验证
+
+现模型：flops: 138.295M         params: 245.720K
+
+
+源模型：flops: 95.704M          params: 148.226K
+
+
+4. 时间验证
+合一模型采用加速库和提频版本测试下来，V821上推理一次的时间是156ms
+
+之前版本的face detectd的版本gfas_v2.2时间是115ms,  hand detect的版本detect_v1.5是44ms
+
+5. 现在精度
+脸相比原先下降1-5%，掌全面提升，map50可以稳定在0.96左右，map50-95可以稳定0.85左右
+
+
+
+
+
+# 模型优化
+
+1003: 			flops: 138.295M         params: 245.720K
+1004： c2f		flops: 175.897M         params: 298.200K
+
+1005： 扩大通道数	flops: 186.707M         params: 275.312K
+1006:head也扩大 	flops: 186.707M         params: 275.312K
+
+改进 优化数据比例 从1：3 改进为1：4 5左右
+1004 将卷积层替换为了C2f
+1005 扩大通道数 将1123的backbone结构移到train 但head未改变通道数量
+
+
+
+
+
+
+ 

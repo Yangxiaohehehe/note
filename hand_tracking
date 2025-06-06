@@ -1,0 +1,122 @@
+插一个任务进来：
+1.非门锁的脸掌识别场景，是单独的Hand Tracking场景，Hand Tracking框架包含detect/landmark模型，现要更新其中的detect部分
+2.原模型在cvteam:R141中的pixtalks/tasks/hand_detection/hand_type/exp40，先在cvteam:R236(原face_detect_pixtorch，现改为object_detect_pixtorch)中重构复现原实验结果，另开一轮实验批次(1300)与掌脸二合一错开
+3.部分数据在另外一服务器上(s4)，晚些会开账号给你，到时将对应目录挂载于s2上训练
+4.精度与原先对上后，我会再提供新的数据和网络结构用于训练
+5.优先级比其他任务高，但不紧急，正常并行推进即可
+
+
+
+# 介绍以及相关准备
+## 任务介绍
+Hand Tracking场景，Hand Tracking框架包含detect/landmark模型
+利用1200的项目，新开一个1300即可，开了后可以copy二合一的部分函数代码过来从而进行部署这个项目
+
+
+
+## 在机器上的相关调试以及配置
+在s2上运行ssh -p 2290 yangchenhe@s4.pixtalks.com可跳到s4
+参考/media/data2/pixtalks_public/zsh使用oh-my-zsh/自行配置zsh使用
+/media/data1/pixtalks_train_data
+
+
+
+
+
+
+
+
+
+RHD_published_v2
+
+himax_HV3_SH431UP_305_pix_hand_shoutao_20230908  79G		
+SH431UL_hand_20231122				175G			
+himax_TOF_hand_collect_30_150cm_20231215		166G
+himax_TOF_hand_gesutre_pixtalks_collect_20231220	260G  传输了 289G??
+
+
+# 实际训练
+##  训练相关路径
+train: [
+        '/media/expand/2001/train_hand/handpose_rgb/hand_type/handpose_datasets_v1_train_bboxes.txt',
+        '/media/expand/2001/train_hand/handpose_rgb/hand_type/handpose_datasets_v2_train_bboxes.txt',
+        '/media/expand/2001/train_hand/RHD_published_v2/hand_type/training_bboxes.txt',
+        '/media/expand/2001/train_hand/FreiHAND_pub_v2/hand_type/training_bboxes.txt',
+        '/media/expand/2001/train_hand/hand_data_irp1p2/hand_type/v4.0/p1/p1_train_bboxes.txt',
+        '/media/expand/2001/train_hand/hand_data_irp1p2/hand_type/v4.0/p2/p2_train_bboxes.txt',
+        '/media/expand/2001/train_hand/himax_HV3_SH431UP_305_pix_hand_shoutao_20230908/hand_type/v4.0/p3/p3_train_bboxes.txt',
+        '/media/expand/2001/train_hand/SH431UL_hand_20231122/hand_type/v4.0/p4/p4_train_Hand_bboxes.txt',
+        '/media/expand/2001/train_hand/SH431UL_hand_20231122/hand_type/v4.0/p4/p4_train_Nohand_bboxes.txt',
+        '/media/expand/2001/train_hand/himax_TOF_hand_collect_30_150cm_20231215/hand_type/v4.1/p5/p5_train_bboxes.txt',
+        '/media/expand/2001/train_hand/himax_TOF_hand_gesutre_pixtalks_collect_20231220/hand_type/v4.1/p6/p6_train_bboxes.txt',
+        '/media/data1/zhengbin/Datasets/hand_from_facedata/hand_type/train_landmarks_bboxes.txt',
+val:  [
+          '/media/expand/2001/train_hand/handpose_rgb/hand_type/handpose_datasets_v1_test_bboxes.txt',
+          '/media/expand/2001/train_hand/handpose_rgb/hand_type/handpose_datasets_v2_test_bboxes.txt',
+          '/media/expand/2001/train_hand/RHD_published_v2/hand_type/evaluation_bboxes.txt',
+          '/media/expand/2001/train_hand/FreiHAND_pub_v2/hand_type/evaluation_bboxes.txt',
+          '/media/data1/zhengbin/Datasets/hand_from_facedata/hand_type/val_landmarks_bboxes.txt',
+          '/media/expand/2001/train_hand/hand_data_irp1p2/hand_type/v4.0/p1/p1_val_bboxes.txt',
+          '/media/expand/2001/train_hand/hand_data_irp1p2/hand_type/v4.0/p2/p2_val_bboxes.txt',
+          '/media/expand/2001/train_hand/himax_HV3_SH431UP_305_pix_hand_shoutao_20230908/hand_type/v4.0/p3/p3_val_bboxes.txt',
+          '/media/expand/2001/train_hand/SH431UL_hand_20231122/hand_type/v4.0/p4/p4_val_Hand_bboxes.txt',
+          '/media/expand/2001/train_hand/SH431UL_hand_20231122/hand_type/v4.0/p4/p4_val_Nohand_bboxes.txt',
+          '/media/expand/2001/train_hand/himax_TOF_hand_collect_30_150cm_20231215/hand_type/v4.1/p5/p5_val_bboxes.txt', 
+          '/media/expand/2001/train_hand/himax_TOF_hand_gesutre_pixtalks_collect_20231220/hand_type/v4.1/p6/p6_val_bboxes.txt'
+       ]
+        
+       
+       
+       
+       
+## 实现步骤
+主要是将二合一步骤的函数进行了copy，比如ultralytic，yolo/dataset ops等，但是那边的内容有tag，需要对相关部分进行更改即可
+   
+       
+## 测试原结果  
+利用data4.1进行测试
+相关命令： python val.py --weights pixtalks/tasks/hand_detection/hand_type/exp40/weights/best.pt --data pixtalks/tasks/hand_detection/hand_type/data_4.1.yaml
+
+                 Class     Images  Instances          P          R      mAP50   mAP50-95: 100%|██████████| 8453/8453 [43:47<00:00,  3.22it/s] 
+                   all     270477     392911      0.914       0.91       0.94      0.722
+                     L     270477     178983      0.907      0.903      0.931      0.714
+                     R     270477     213928       0.92      0.918      0.948       0.73
+
+ 
+       
+后处理已解决完整
+
+
+
+
+        
+       
+2025-05-12 15:55:23,427 | | LH       | 262674  | 177205    | 0.868  | 0.840  | 0.881   | 0.715     |
+2025-05-12 15:55:23,427 | | RH       | 262674  | 211398    | 0.867  | 0.890  | 0.904   | 0.738     |
+2025-05-12 15:55:23,427 | | ALL      | 262674  | 388603    | 0.867  | 0.865  | 0.892   | 0.727     |       
+       
+       
+1300：利用小模型的网络结构进行测试
+1302: 旋转180度 尺寸和256 256
+原模型：
+YOLOv5sE_2cls_imgsz256 summary: 
+159 layers, 340394 parameters, 0 gradients, 1.9 GFLOPs
+
+新模型：
+256 256
+flops: 226.853M         params: 148.226K
+
+       
+       
+       
+## training
+
+
+
+
+       
+       
+       
+       
+       
+       

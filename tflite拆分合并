@@ -1,0 +1,62 @@
+# tflite拆分合并
+
+## tflite 拆分
+步骤
+1. 从原始tflite模型提取OperatorCodes并创建operatorcodes -> 
+2. 收集相关Tensor和Buffer
+3. 处理量化参数
+4. 构建Tensors和operator
+5. 构建Subgraph
+6. 复制原数据并组装
+
+### 原到问题
+
+1. 中间一直出问题，问题出在最后模型构建,没有使用制定方法
+2. 根据json文件,中间拆分少了很多细节,比如卷积层和relu函数,在拆分后获得的子模型少了属性,需要在op中加入相关信息
+
+
+
+
+### 模型结构
+---
+Model
+├── OperatorCodes          # 全局操作符类型列表（如 Conv2D、Add）
+├── SubGraphs              # 子图列表
+│   └── SubGraph 1
+│       ├── Tensors        # 子图的张量列表
+│       ├── Inputs         # 输入张量索引（如 [0]）
+│       ├── Outputs        # 输出张量索引（如 [10]）
+│       └── Operators     # 算子列表（通过 opcode_index 引用 OperatorCodes）
+|———版本和描述
+└── Buffers                # 全局权重/常量数据仓库
+
+---
+
+
+
+
+## Tflite合并
+步骤：
+
+1. 合并两个子文件的json文件，并适配输入输出
+2. 生成合并的json文件后，可以利用flatc反向生成tflite
+
+在改进后的compose函数加入:
+1. 输入tflite模型路径,利用函数转为json文件
+2. 合并json文件
+3. 再利用函数将json文件转换为tflite模型文件
+4. 最后利用递归解决多模型合并的问题
+
+
+### 问题
+1. 在之前的问题中,依然存在合并细节确实的问题,没有relu函数就会导致测试时各种报错,比如维度,多出来一个结点等信息
+2. json默认保留六位精度，但是实际上在使用过程中有15位，这样会导致在tflite模型的前六位一样，后面就有所差别了。(还未完成改进)
+
+
+## TFlite测试
+1. 可视化：tflite_operation/Visulization可进行可视化
+2. 生成json文件：示例：flatc --raw-binary --strict-json -t ./schema_v3c.fbs  -- submodels/submodel_1.tflite 可对比一些参数情况
+3. 输入输出检测： 
+get_origin_output.py 设计了随机种子保证输入随机但可复现,具体使用是检测了原始模型和子模型，生成两个文件对比输出,对比最大差异和平均
+4. tflite_operation/get_info.py 可以检测相关模型信息
+

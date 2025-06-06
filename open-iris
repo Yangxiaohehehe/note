@@ -1,0 +1,549 @@
+
+
+
+
+
+1.处理泮安排的任务(优先)
+2.全局活体+掌检测二合一模型调通可视化确保没有明显bug，再进一步改善精度(加大模型结构/调整数据比例) 
+3.全局活体继续尝试提高精度(正常模型/小模型，作为长线任务) 
+4.找合适的虹膜识别工作(有完整框架，可根据给定图像完成检测/对齐/识别等步骤，并输出虹膜特征的)，并尝试跑起来，后续会实现我们自己的虹膜识别算法(优先级低)
+
+
+
+
+# 虹膜方法调研
+## 虹膜本身方法介绍
+
+### 传统现有图片检测/识别方法
+大部分是人脸检测框架：人脸检测+关键点定位
+与虹膜对比：
+虹膜训练需 ​​专用预处理流程​​：
+
+	进行虹膜内外边缘定位、归一化和图像增强
+	图像去噪（高斯滤波/小波变换）
+	虹膜区域分割（霍夫变换定位瞳孔边界）
+	特征编码（LBP算子提取环形纹理）
+	数据增强（旋转/缩放应对瞳孔形变） 
+    
+    
+    
+后处理阶段：相似性度量算法​​
+    
+    
+    
+    
+​特征维度​​	​​虹膜识别​​	​​			人脸识别​​
+​​结构特征​​	环状放射纹理（类似树木年轮）		立体几何结构（五官分布）
+​定位目标​​	虹膜内外边界、眼睑遮挡分割		面部整体区域（无需解剖结构分割）
+​​关键处理目标​​	消除光斑干扰、精确定位瞳孔边界		消除姿态变化、光照归一化
+
+
+
+## Open iris
+### 介绍
+	基本流程是进行:分割（深度学习模型）、归一化、特征提取（各种Gabor滤波器横跨图像）和匹配
+	只有分割采用了深度学习模型(使用Hugging Face预训练模型进行虹膜区域多标签分割),后面三个步骤都采用了数学化方法.
+	网址: https://world.org/zh-cn/blog/engineering/iris-recognition-inference-system
+	
+### 流程
+
+open iris的具体pipline中的流程如下:
+
+
+	|----->segmentation---->segmentation_binarization（图像分割和二值化）--->vectorization--->interpolation
+	|						|	-----------------------------------|		
+	|						|	|
+	|						|	|			|----------------------------------------------------------------------------------------
+	|						|	|			|											|
+	|						|	|			|--------------------------------------------------------				|
+	|						|	↓			|							↓				↓
+	|						|--->distance_filter---->eye_center_estimation------------------------>smoothing----->geometry_estimation------------->pupil_to_iris_property
+	|						|		|									|
+	|						|		|									|
+	|						|		|									|----->offgaze_estimation
+	|						|		|									|
+	|						|		|------>eye_orientation							|
+	|						|				|							|
+	|						|				|							|
+	|						|				|							|	
+	|						|				|							|
+	|						|				|							|
+	|						↓				|							|
+input---|----->specular_reflection_detection------>noise_masks_aggregation		|							|
+	|							|			|							|
+	|							|			↓							|
+	|							|	------------------------------------------------------------------------|
+	|							|	|									|
+	|							|	|									|
+	|							|	|									|
+	|							|	|									|
+	|							↓	↓									|
+  	|--------------------------------------------------------->normalization----->filter_bank----->encoder					|
+	|																	|
+	|																	|													
+	|																	|
+	|																	|
+	|																	↓
+	|----------------------------------------------------------------------------------------------------------------------------------bound_box_estimate
+
+
+    ​normalization（归一化）​​
+    执行Rubber Sheet模型变换：
+    将虹膜区域展开为64x512的矩形纹理图
+    使用双线性插值补偿几何变形
+   将虹膜环形区域划分为多个梯形区块（trapezoid），通过透视变换矩阵将每个梯形映射为归一化图像中的矩形区块。
+    
+      ​encoder（编码器）​​
+    生成2048位虹膜编码：
+    对滤波器响应进行局部二值化(LBP)
+    采用汉明距离比对，错误率<10^-6
+
+分割（深度学习模型）、归一化、特征提取（各种Gabor滤波器横跨图像）和匹配
+
+1. 可以修改配置文件:引入自己的函数,修改顺序,参数
+2. 绘图
+3. 匹配 同一只眼小于0.3 不同大于0.38
+
+参数中有eye_side,
+距离
+
+
+1. 完成测试,对比公开数据集上的错误匹配率
+2. 
+
+
+
+归一化:
+
+梯形网格划分​​：在原始图像中创建围绕虹膜的梯形网格（基于intermediate_radiuses参数生成多个同心环）
+​​透视矩阵计算​​：对每个梯形区域计算到矩形区域的映射矩阵（使用OpenCV的getPerspectiveTransform）
+​​双线性插值​​：通过interpolate_pixel_intensity实现非整数坐标的像素值插值，保证图像平滑过渡
+​​噪声处理​​：结合NoiseMask和过饱和像素检测（oversat_threshold），生成归一化后的虹膜有效区域掩模
+
+
+
+
+
+
+## 对不同数据集下，利用测试
+
+### 评估指标
+大方向为EER 和ROC
+	
+	TP（True Positive，真阳性）​​：模型​​正确预测为正类​​的样本数量，		实际和预测均为T
+	TN（True Negative，真阴性）​​：模型​​正确预测为负类​​的样本数量。		实际和预测均F
+	​​FP（False Positive，假阳性）​​：模型​​错误预测为正类​​的样本数量。		实际F，预测T
+	FN（False Negative，假阴性）​​：模型​​错误预测为负类​​的样本数量（实际为正类）。	实际T，预测F 
+
+ROC具体：
+
+	TPR = TP/ TP+FN 正确识别正类的能力
+	FPR = FP/ FP+TN 错误将负类判为正类的比例  假阳率
+	高TPR，低FPR越好
+
+
+EER ​​假正率（FPR）​​等于​​假负率（FNR）​​时的错误率
+	FPR = FPR 
+	FNR = 1 - TPR 
+
+
+
+### utiris数据集测试
+
+
+
+
+
+
+1. 全局活体优化
+
+2. 二合一优化
+
+3. 利用虹膜检测方法对数据集测试
+
+它使得不同类别（不同人的人脸类别）在特征空间中的角度距离增大。假设特征向量和类别中心向量的夹角为\(\theta\)
+
+
+为了达成这个目的，研究者提出了不同的学习特征的方法。最直观的方式是像学习词嵌入一样，用一个具体的任务来学习特征提取。恰好，人脸识别可以天然地被当成一个多分类任务：对于一个有 N 个人的人脸训练集，人脸识别就是一个 N 分类任务。只要在特征提取后面加一个线性层和一个 softmax 就可以做多分类了。训练好多分类器后，扔掉线性层和 softmax 层，就得到了一个特征提取器。
+
+这种基于 softmax 分类器的学习方法确实能够区分训练集中的人脸，但在辨别开放人脸数据集时表现不佳。这是因为 softmax 的学习目标仅仅是区分不同类别的人脸，而没有要求这种区分有多么分明。后续的多篇工作，包括 ArcFace，都是在改进训练目标 softmax，使得每类对象之间有一个较大的间隔。
+
+
+
+有图片检测步道：
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/035/L/S2035L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/035/L/S2035L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/035/L/S2035L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/045/R/S2045R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/053/L/S2053L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/L/S2056L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/056/R/S2056R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/L/S2062L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/L/S2062L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/062/R/S2062R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/066/L/S2066L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/069/L/S2069L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/069/L/S2069L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/069/L/S2069L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/069/L/S2069L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/L/S2072L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/L/S2072L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/072/R/S2072R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/073/L/S2073L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/074/L/S2074L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/074/L/S2074L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/074/L/S2074L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/079/L/S2079L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/088/R/S2088R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/089/R/S2089R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/091/L/S2091L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/093/R/S2093R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/094/R/S2094R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/096/L/S2096L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/096/L/S2096L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/096/L/S2096L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/L/S2098L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/R/S2098R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/R/S2098R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/R/S2098R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/R/S2098R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/098/R/S2098R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/103/L/S2103L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/L/S2107L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/107/R/S2107R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/116/R/S2116R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/122/L/S2122L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/122/L/S2122L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/122/L/S2122L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/122/L/S2122L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/122/L/S2122L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/129/L/S2129L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/134/L/S2134L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/134/L/S2134L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/142/L/S2142L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/142/R/S2142R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/152/R/S2152R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/L/S2164L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/L/S2164L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/L/S2164L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/R/S2164R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/R/S2164R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/R/S2164R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/164/R/S2164R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/176/L/S2176L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/176/L/S2176L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/176/L/S2176L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/187/R/S2187R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/192/L/S2192L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/192/L/S2192L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/210/R/S2210R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/220/R/S2220R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/226/L/S2226L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/233/L/S2233L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/L/S2244L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/244/R/S2244R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/L/S2260L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/L/S2260L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/L/S2260L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/L/S2260L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/L/S2260L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/260/R/S2260R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/L/S2261L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/261/R/S2261R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/266/R/S2266R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/279/R/S2279R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/282/L/S2282L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/282/L/S2282L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/L/S2291L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/R/S2291R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/R/S2291R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/R/S2291R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/291/R/S2291R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/292/R/S2292R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/293/R/S2293R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/301/R/S2301R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/301/R/S2301R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/301/R/S2301R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/311/L/S2311L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/326/R/S2326R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/L/S2327L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R05.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R08.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R16.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/327/R/S2327R20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/334/R/S2334R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/350/R/S2350R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/373/R/S2373R12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/379/L/S2379L09.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/380/L/S2380L06.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/383/L/S2383L10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/383/L/S2383L13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/384/L/S2384L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/397/L/S2397L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/397/L/S2397L17.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/397/L/S2397L18.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/398/R/S2398R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/L/S2404L01.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/L/S2404L12.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/L/S2404L20.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/R/S2404R11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/R/S2404R13.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/R/S2404R14.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/404/R/S2404R15.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/409/R/S2409R04.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/410/L/S2410L11.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/L/S2411L02.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/L/S2411L19.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/R/S2411R03.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/R/S2411R07.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/R/S2411R10.jpg
+特征为None的图谱路径: /home/yang/Downloads/CASIA-IrisV4(JPG)/CASIA-Iris-Lamp/411/R/S2411R20.jpg
+
+
