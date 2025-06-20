@@ -150,3 +150,11 @@ sleep 2 && python train.py
 
 
 
+## zsh
+
+cat /etc/shells
+查看有几种shell
+
+ctrl r 搜索历史命令 更快捷
+
+

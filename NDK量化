@@ -12,8 +12,109 @@ NDK（Neural-network processing unit Development Kit）能够帮助用户将训�
 跑通训练
 
 
+## 原始代码
+### 量化过程
+原始代码:
+会进行两次量化
+第一次是ptq量化,第二次是qat量化.
+具体量化就是标签和推理进行损失函数计算，仅此而已。
+
+
+### 模型保存
+由于是多头的，所以保存方式只能设置use_machine_code=True。
+保存会得.bin 等文件
+
+### 模型调用
+详情请见ndk文档中的其它工具函数，主要是：ndk.modelpack.load_from_file，get_tensor_name_list，
+
+
+### 模型误差分析
+见ndk文档中的4.5章节
+工具主要包含了两个函数：analyze_tensor_distribution和compare_float_and_quant
+其中依旧需要用到dataloader的生成.
 
 
 
-## 
+
+### Python 生成器用法简介
+	由于受到内存的限制，列表容量是受限的。如果创建一个包含一个亿个
+元素列表，会占用很大的存储空间，若用户只想访问列表前面几个元素，则列表后面绝
+大多数元素占用的空间就都白白浪费了。
+	为了解决以上问题，Python 引入了一中“一边循环，一边计算”的机制，即当用户需要使
+用某个对象时，Python 才根据事先设计好的规则开辟内存空间创建这个对象供用户使
+用，而不是像列表一样事先将所有的对象都创建完毕之后再提供给用户使用。这种机制
+在 Python 中称为生成器（generator）。
+
+
+生成：把一个列表生成式的[ ]中括号改为（）小括号即可创建一个 generator。
+调用：next(generator_ex)
+使用 yield 返回值函数，每次调用 yield 会暂停，可以使用 next()函数和 send()函数恢复生成器。
+具体流程：在每次调用 next()的时候执行，遇到 yield 语句返回，再次被 next（）调用时候从上次的返回 yield 语句处急需执行，也就是用多少，取多少。
+
+
+## 问题
+
+### 问题1 输出维度有2有64
+问题在于
+[Detect调试] 输入数量: 1, 尺寸: [torch.Size([128, 96, 32, 24])]
+[Detect调试] 当前模式: export=True, training=False
+[Detect调试] 层0 - 回归输出: torch.Size([128, 64, 32, 24]), 分类输出: torch.Size([128, 2, 32, 24])
+[Detect调试] 准备返回结果: 长度=2, 类型=<class 'list'>
+[Detect调试] Export模式输出: 
+  输出0: shape=torch.Size([128, 64, 32, 24]), dtype=torch.float32
+  输出1: shape=torch.Size([128, 2, 32, 24]), dtype=torch.float32
+
+
+1.Detect层有两个输出，分别是回归输出和分类输出，但是再ndk量化过程中不会走多头的if，因为没有预先规定Detect是多头
+就导致有时候选取的是维度为2的 从而报错。
+2. 虽然是多维输出，但是实际上是两个卷积层的单独输出，从而选择方面出错
+
+
+Layer 82: name=model_0_cv3_conv_Conv, type=Convolution, top=model_0_cv3_conv_Conv_output_0
+Layer 83: name=model_0_cv3_act_Relu, type=ReLU, top=model_0_cv3_act_Relu_output_0
+Layer 84: name=model_2_cv2_0_cv2_0_0_conv_Conv, type=Convolution, top=model_2_cv2_0_cv2_0_0_conv_Conv_output_0
+Layer 85: name=model_2_cv2_0_cv2_0_0_act_Relu, type=ReLU, top=model_2_cv2_0_cv2_0_0_act_Relu_output_0
+Layer 86: name=model_2_cv2_0_cv2_0_1_conv_Conv, type=Convolution, top=model_2_cv2_0_cv2_0_1_conv_Conv_output_0
+Layer 87: name=model_2_cv2_0_cv2_0_1_act_Relu, type=ReLU, top=model_2_cv2_0_cv2_0_1_act_Relu_output_0
+Layer 88: name=model_2_cv2_0_cv2_0_2_Conv, type=Convolution, top=b1
+Layer 89: name=model_2_cv3_0_cv3_0_0_cv3_0_0_0_conv_Conv, type=Convolution, top=model_2_cv3_0_cv3_0_0_cv3_0_0_0_conv_Conv_output_0
+Layer 90: name=model_2_cv3_0_cv3_0_0_cv3_0_0_0_act_Relu, type=ReLU, top=model_2_cv3_0_cv3_0_0_cv3_0_0_0_act_Relu_output_0
+Layer 91: name=model_2_cv3_0_cv3_0_0_cv3_0_0_1_conv_Conv, type=Convolution, top=model_2_cv3_0_cv3_0_0_cv3_0_0_1_conv_Conv_output_0
+Layer 92: name=model_2_cv3_0_cv3_0_0_cv3_0_0_1_act_Relu, type=ReLU, top=model_2_cv3_0_cv3_0_0_cv3_0_0_1_act_Relu_output_0
+Layer 93: name=model_2_cv3_0_cv3_0_1_cv3_0_1_0_conv_Conv, type=Convolution, top=model_2_cv3_0_cv3_0_1_cv3_0_1_0_conv_Conv_output_0
+Layer 94: name=model_2_cv3_0_cv3_0_1_cv3_0_1_0_act_Relu, type=ReLU, top=model_2_cv3_0_cv3_0_1_cv3_0_1_0_act_Relu_output_0
+Layer 95: name=model_2_cv3_0_cv3_0_1_cv3_0_1_1_conv_Conv, type=Convolution, top=model_2_cv3_0_cv3_0_1_cv3_0_1_1_conv_Conv_output_0
+Layer 96: name=model_2_cv3_0_cv3_0_1_cv3_0_1_1_act_Relu, type=ReLU, top=model_2_cv3_0_cv3_0_1_cv3_0_1_1_act_Relu_output_0
+Layer 97: name=model_2_cv3_0_cv3_0_2_Conv, type=Convolution, top=c1
+
+修改：
+返回所有out 并在训练部分对两个头进行分别计算损失。
+
+
+
+
+
+
+### 问题2:
+ 2837842 segmentation fault (core dumped)  python -X faulthandler test_bin.py
+检查了发现是:导入包顺序的问题,ndk的包应该在后面导入,否则会导致cuda出错
+
+
+
+### 问题3:
+包版本问题:
+ time没有再使用time.clock() ,统一修改成time.perf_counter()即可
+ 
+ 
+ 
+### 问题4：
+经过tester输出准确率很低
+原因：
+1. 要确定返回顺序是不是b1 c1
+2. 原本返回类型是double 需要转成ptop 已经在ptop.py中实现了
+ 
+
+
+
+
 

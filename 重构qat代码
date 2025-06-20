@@ -1,7 +1,11 @@
 # 任务介绍
 需要将原先的qat代码进行重构
+并且将5007代码跑通训练、分析
+两部分内容融合在一起
 
-官方api
+# qat量化
+## 背景知识
+qat量化代码官方api
 https://www.tensorflow.org/model_optimization/guide/quantization/training_comprehensive_guide?hl=zh-cn
 
 
@@ -10,37 +14,17 @@ https://www.tensorflow.org/model_optimization/guide/quantization/training_compre
 插一个优先级不高的任务，重构qat训练代码：
 1.目前export_qat.py里是调用了/media/data2/pixtalks_public/tflite_training里的内容，需将其简化为一个单独无依赖其余项目的脚本
 2.训练的一些配置参数写到配置文件(yaml)里
-4.看每个epoch结束是否能加进测试代码
-
-
-待做：
-3.现做法是将representative_dataset数据一次加载到内存里，应该是显存占用大的原因，将其改为训练时按需加载(train_distill.py中有生成label的参考)
-4. batch问题 不再是固定尺寸1
+3.看每个epoch结束是否能加进测试代码（解决方法：调用test的代码进行测试）
+4.现做法是将representative_dataset数据一次加载到内存里，应该是显存占用大的原因，将其改为训练时按需加载(train_distill.py中有生成label的参考)（解决：）
+5. batch问题 不再是固定尺寸1
 
 
 
 
-～～解决～～：
-保存模型：调用test的代码进行测试
 
-
-
-最主要需要整理的部分是有关dataset的部分。
-
-
-## 总结
-~~1. 训练配置yaml文件的构建~~
-2. 一些函数的整理
-3. 数据修改,包括读取数据和batch问题
-4. 每个epoch加入测试代码
-
-
-
-
-# 理解原代码
+## 理解原代码
 原先ONNX2tflite函数
-
-## 流程
+### 流程
 ​​1. 模型转换​​
 将输入的ONNX模型转换为Keras模型，再进一步转换为TFLite格式，支持浮点或量化模型生成。
 ​​
@@ -55,14 +39,14 @@ https://www.tensorflow.org/model_optimization/guide/quantization/training_compre
 
 
 
-## 参数解析
+### 参数解析
 基础配置​​：随机种子、GPU内存限制、输入/输出数据类型（int8/uint8）等。
 ​​QAT配置​​：学习率、训练数据路径、批次大小、验证集比例、训练轮数等。
 ​​PTQ配置​​：校准数据路径、校准数据量限制、输入形状等。
 
 
-## QAT量化具体
-### 层选择量化：
+### QAT量化具体
+#### 层选择量化：
 	apply_quantization函数，根据layer_quant参数选择需要量化的层（例如，仅量化后半部分层），
 过程中具体使用了quantization.keras.quantize_annotate_layer函数，这个函数可以标注哪一层需要量化
 
@@ -79,7 +63,7 @@ https://www.tensorflow.org/model_optimization/guide/quantization/training_compre
 修改模型结构，但保持浮点权重（训练时仍用浮点计算，但模拟量化效果）。
 	
 
-### 模型编译阶段：
+#### 模型编译阶段：
 配置：
 ​​优化器​​：
 	使用 Adam 优化器，学习率为 lr。
@@ -98,33 +82,70 @@ q_aware_model.summary()
 以及检查参数量变化（量化后部分层参数可能减少，但训练时仍为浮点权重）。
 
 
-### 数据加载阶段：
+#### 数据加载阶段：
 ​​数据加载​​：根据data_iter类型生成训练/验证数据集，支持从ONNX模型生成标签（用于特征对齐）。
-
-
-
 ​​训练与保存​​：执行模型训练，生成包含量化信息的TFLite模型（文件名含_qat后缀）。
 
 
-### 量化感知训练
+#### 量化感知训练
 q_aware_model.fit
 然后将训练好的量化感知模型转换为 TFLite 格式，并应用量化优化。
 
 
-## 数据预处理
+
+## 问题解决
+
+问题3的解决：
+加入测试代码：写了一个回调函数，类似于test.py进行测试，在每一次epoch完进行测试。
+
+
+问题4的解决： 
+显存问题：显存问题的原因是因为pytorch和tensorflow同时调用，会造成显存的恶性竞争，tflite会占用可用显存的百分之90导致的
+显存解决：在训练部分将tensorflow部分在cpu进行，每段代码完了的推理在pytorch GPU上进行
+标签加载：原先是利用onnx模型
+标签解决：仿照蒸馏部分，利用pt模型的export部分进行推理，注意要进行NCWH类似的变换
+
+问题5的解决：
+batch固定为1的问题：问题出在TFLite8bits固定大的input尺寸导致
+batch固定为1的解决：重构了TFLite8bits，动态适配尺寸。运行时形状适配。每次推理动态调整。
 
 
 
 
-## 问题
+## 过程中产生的新问题
+1. 损失会重复输出：问题在于会重复调用了生成器，导致日志生成器重复，重构了tester，对同一个名字的只保存一个日志生成器。test_cfg部分也多个val_qat就可以。
 
 
-## 待处理
 
-1. 数据集的dataloader处理
-（1） 蒸馏的中的处理
-（2） 模型本身推倒的处理 
+# NDK量化
+相关量化见NDK量化部分
 
+
+
+# 两部分代码融合
+## 融合代码结构
+两部分都写成了main函数+utils的格式+trainer的形式（qat包含了一个config文件）
+然后合并main函数，中间加入了一个参数控制，然后根据开关选择trainer的类型。
+
+
+## 融合现状
+显存占用情况：
+qat部分的显存占用不多，目前来看几百mb的样子
+5007的显存占用最高在9000mb内，
+
+时间：
+qat运行2h内能够完成，测试平均一次0.5-1h。
+5007的运行由具体的batch决定，但是也比较快，2,3h内也可以，两个测试时间比较长。
+
+
+
+## 参数设置
+qat的参数设置主要见config文件
+
+5007 
+1.因为有两个输出，所以训练部分是手动设置：两个损失之间的比例等
+2. epoch次数、每次epoch内迭代次数
+3. 学习率1e-5，量化部分的num_step
 
 
 
